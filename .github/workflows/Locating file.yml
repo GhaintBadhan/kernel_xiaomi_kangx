@@ -1,4 +1,4 @@
-name: Locate python2 / mkdtboimg usage in kernel tree
+name: Inspect mkdtboimg.py for Python 2-isms
 
 on:
   workflow_dispatch:
@@ -16,10 +16,10 @@ permissions:
   contents: read
 
 jobs:
-  locate:
+  inspect:
     runs-on: ubuntu-latest
     env:
-      PATTERN: 'cmd_mkdtimg|mkdtboimg|python2'
+      PATTERN: 'print [^(]|xrange|iteritems|unicode\(|raw_input|basestring'
 
     steps:
       - name: Clone kernel source (depth=1)
@@ -28,104 +28,43 @@ jobs:
           git clone --depth=1 --branch "${{ inputs.ref }}" "${{ inputs.repo }}" kernel_xiaomi_kangx
           cd kernel_xiaomi_kangx
           {
-            echo "## python2 / mkdtboimg locator"
+            echo "## mkdtboimg.py Python-2-ism check"
             echo "- Repo: \`${{ inputs.repo }}\`"
             echo "- Ref: \`${{ inputs.ref }}\`"
             echo "- HEAD: \`$(git log -1 --oneline)\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Grep for cmd_mkdtimg / mkdtboimg / python2
+      - name: head -n 5 + grep py2-isms
         run: |
           set -uo pipefail
           cd kernel_xiaomi_kangx
 
-          # Only search paths that actually exist (avoids literal-glob noise)
-          dirs=()
-          [ -d scripts ] && dirs+=("scripts")
-          [ -d arch/arm64 ] && dirs+=("arch/arm64")
+          SCRIPT="scripts/mkdtboimg.py"
 
-          OUT=""
-          if [ ${#dirs[@]} -eq 0 ]; then
-            OUT="(neither scripts/ nor arch/arm64/ found)"
-          else
-            OUT="$(grep -rnE "$PATTERN" "${dirs[@]}" 2>/dev/null || true)"
-            [ -z "$OUT" ] && OUT="(no matches for: $PATTERN)"
-          fi
-
-          {
-            echo ""
-            echo "### grep -rnE \`$PATTERN\` \`${dirs[*]:-<none>}\`"
-            echo '```'
-            echo "$OUT"
-            echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY"
-
-      - name: Show the actual cmd_mkdtimg definition (context)
-        run: |
-          set -uo pipefail
-          cd kernel_xiaomi_kangx
-
-          OUT=""
-          if [ -f scripts/Makefile.lib ]; then
-            OUT="$(grep -nE 'quiet_cmd_mkdtimg|cmd_mkdtimg' scripts/Makefile.lib 2>/dev/null || true)"
-          fi
-          [ -z "$OUT" ] && OUT="(no quiet_cmd_mkdtimg/cmd_mkdtimg found in scripts/Makefile.lib)"
-
-          {
-            echo ""
-            echo "### \`scripts/Makefile.lib\` — mkdtimg rule"
-            echo '```'
-            echo "$OUT"
-            echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY"
-
-      - name: Inspect mkdtboimg.py for Python-2-only syntax
-        run: |
-          set -uo pipefail
-          cd kernel_xiaomi_kangx
-
-          SCRIPT="$(find scripts -name 'mkdtboimg.py' -type f 2>/dev/null | head -n1 || true)"
-
-          {
-            echo ""
-            echo "### mkdtboimg.py inspection"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-          if [ -z "$SCRIPT" ]; then
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-            echo "(mkdtboimg.py not found under scripts/)" >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          if [ ! -f "$SCRIPT" ]; then
+            {
+              echo ""
+              echo "### \`$SCRIPT\`"
+              echo '```'
+              echo "(file not found)"
+              echo '```'
+            } | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
-          {
-            echo "Script: \`$SCRIPT\`"
-            echo ""
-            echo "Shebang / first lines:"
-            echo '```'
-            head -n 5 "$SCRIPT"
-            echo '```'
-            echo "Python-2-ism hits (\`print \` without paren, xrange, iteritems, unicode\`):"
-            echo '```'
-            grep -nE 'print [^(]|xrange|iteritems|unicode\(' "$SCRIPT" 2>/dev/null || echo "(none — likely Python 3 compatible)"
-            echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY"
-
-      - name: Check how dtbo.img is wired into default build
-        run: |
-          set -uo pipefail
-          cd kernel_xiaomi_kangx
-
-          OUT=""
-          if [ -f arch/arm64/Makefile ]; then
-            OUT="$(grep -nE 'dtbo\.img|dtb\.img|^all:|^Image' arch/arm64/Makefile 2>/dev/null || true)"
-          fi
-          [ -z "$OUT" ] && OUT="(no dtbo.img/dtb.img/all: references found in arch/arm64/Makefile)"
+          HEAD_OUT="$(head -n 5 "$SCRIPT")"
+          GREP_OUT="$(grep -nE "$PATTERN" "$SCRIPT" 2>/dev/null || true)"
+          [ -z "$GREP_OUT" ] && GREP_OUT="(no Python-2-ism hits — likely Python 3 compatible)"
 
           {
             echo ""
-            echo "### \`arch/arm64/Makefile\` — default goal wiring"
+            echo "### Shebang / first lines"
             echo '```'
-            echo "$OUT"
+            echo "$HEAD_OUT"
+            echo '```'
+            echo ""
+            echo "### grep -nE \`$PATTERN\`"
+            echo '```'
+            echo "$GREP_OUT"
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"

@@ -1,4 +1,4 @@
-name: Inspect mkdtboimg.py for Python 2-isms
+name: Kernel inspection — py2-isms, dtbo gating, module signing
 
 on:
   workflow_dispatch:
@@ -19,7 +19,8 @@ jobs:
   inspect:
     runs-on: ubuntu-latest
     env:
-      PATTERN: 'print [^(]|xrange|iteritems|unicode\(|raw_input|basestring'
+      PY2_EXTENDED: 'except\s+\w+\s*,\s*\w+\s*:|has_key|\.iteritems|\.itervalues|\.iterkeys|basestring|raw_input'
+      DEFCONFIG_GREP: 'BUILD_ARM64_DTBO_IMG|BUILD_ARM64_DTB_IMG|MODULE_SIG|MODULE_FORCE_LOAD|CONFIG_MODULES|CONFIG_LOCALVERSION'
 
     steps:
       - name: Clone kernel source (depth=1)
@@ -28,43 +29,141 @@ jobs:
           git clone --depth=1 --branch "${{ inputs.ref }}" "${{ inputs.repo }}" kernel_xiaomi_kangx
           cd kernel_xiaomi_kangx
           {
-            echo "## mkdtboimg.py Python-2-ism check"
+            echo "## Kernel inspection"
             echo "- Repo: \`${{ inputs.repo }}\`"
             echo "- Ref: \`${{ inputs.ref }}\`"
             echo "- HEAD: \`$(git log -1 --oneline)\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: head -n 5 + grep py2-isms
+      - name: '1. Extended py2-ism grep on mkdtboimg.py'
+        run: |
+          set -uo pipefail
+          cd kernel_xiaomi_kangx
+          SCRIPT="scripts/mkdtboimg.py"
+
+          if [ ! -f "$SCRIPT" ]; then
+            OUT="(file not found)"
+          else
+            OUT="$(grep -nE "$PY2_EXTENDED" "$SCRIPT" 2>/dev/null || true)"
+            [ -z "$OUT" ] && OUT="(no extended py2-isms — xrange at line 615 is likely the only blocker)"
+          fi
+
+          {
+            echo ""
+            echo "### 1. Extended py2-ism grep: \`$PY2_EXTENDED\`"
+            echo '```'
+            echo "$OUT"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: '2. All python2 references in tree'
         run: |
           set -uo pipefail
           cd kernel_xiaomi_kangx
 
-          SCRIPT="scripts/mkdtboimg.py"
+          dirs=()
+          [ -d scripts ] && dirs+=("scripts")
+          [ -d arch/arm64 ] && dirs+=("arch/arm64")
 
-          if [ ! -f "$SCRIPT" ]; then
-            {
-              echo ""
-              echo "### \`$SCRIPT\`"
-              echo '```'
-              echo "(file not found)"
-              echo '```'
-            } | tee -a "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
-          HEAD_OUT="$(head -n 5 "$SCRIPT")"
-          GREP_OUT="$(grep -nE "$PATTERN" "$SCRIPT" 2>/dev/null || true)"
-          [ -z "$GREP_OUT" ] && GREP_OUT="(no Python-2-ism hits — likely Python 3 compatible)"
+          OUT="$(grep -rnE '\bpython2\b' "${dirs[@]}" build* Makefile* 2>/dev/null || true)"
+          [ -z "$OUT" ] && OUT="(no python2 references found)"
 
           {
             echo ""
-            echo "### Shebang / first lines"
+            echo "### 2. All \`python2\` references"
             echo '```'
-            echo "$HEAD_OUT"
+            echo "$OUT"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: '3. arch/arm64/Makefile context (135-175)'
+        run: |
+          set -uo pipefail
+          cd kernel_xiaomi_kangx
+          if [ -f arch/arm64/Makefile ]; then
+            OUT="$(sed -n '135,175p' arch/arm64/Makefile)"
+          else
+            OUT="(arch/arm64/Makefile not found)"
+          fi
+          {
+            echo ""
+            echo "### 3. \`arch/arm64/Makefile\` lines 135–175"
+            echo '```makefile'
+            echo "$OUT"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: '4. scripts/Makefile.lib context (320-340)'
+        run: |
+          set -uo pipefail
+          cd kernel_xiaomi_kangx
+          if [ -f scripts/Makefile.lib ]; then
+            OUT="$(sed -n '320,340p' scripts/Makefile.lib)"
+          else
+            OUT="(scripts/Makefile.lib not found)"
+          fi
+          {
+            echo ""
+            echo "### 4. \`scripts/Makefile.lib\` lines 320–340"
+            echo '```makefile'
+            echo "$OUT"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: '5. vili_defconfig — DTBO / module signing / vermagic'
+        run: |
+          set -uo pipefail
+          cd kernel_xiaomi_kangx
+          DEFCONFIG="arch/arm64/configs/vili_defconfig"
+
+          if [ ! -f "$DEFCONFIG" ]; then
+            OUT="(vili_defconfig not found — check step 6 for actual filename)"
+          else
+            OUT="$(grep -nE "$DEFCONFIG_GREP" "$DEFCONFIG" 2>/dev/null || true)"
+            [ -z "$OUT" ] && OUT="(no matches — possibly all options are inherited from a base fragment)"
+          fi
+
+          {
+            echo ""
+            echo "### 5. \`vili_defconfig\` — \`$DEFCONFIG_GREP\`"
+            echo '```'
+            echo "$OUT"
             echo '```'
             echo ""
-            echo "### grep -nE \`$PATTERN\`"
+            echo "> \`CONFIG_MODULE_SIG_FORCE=y\` → stock vendor modules will be rejected (WiFi/camera/touch break)."
+            echo "> \`CONFIG_LOCALVERSION\` → must match the vermagic of the vendor modules you'll load."
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: '6. List all defconfigs'
+        run: |
+          set -uo pipefail
+          cd kernel_xiaomi_kangx
+          if [ -d arch/arm64/configs ]; then
+            OUT="$(ls -1 arch/arm64/configs)"
+          else
+            OUT="(arch/arm64/configs not found)"
+          fi
+          {
+            echo ""
+            echo "### 6. \`arch/arm64/configs\`"
             echo '```'
-            echo "$GREP_OUT"
+            echo "$OUT"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: '7. Toolchain probe'
+        run: |
+          set -uo pipefail
+          {
+            echo ""
+            echo "### 7. Toolchain probe (ubuntu-latest)"
+            echo '```'
+            echo "OS:      $(lsb_release -ds 2>/dev/null || grep PRETTY_NAME /etc/os-release)"
+            echo "python3: $(command -v python3 || echo '(missing)') — $(python3 --version 2>&1)"
+            echo "python2: $(command -v python2 || echo '(missing)')"
+            echo "clang:   $(command -v clang || echo '(missing)') — $(clang --version 2>&1 | head -n1 || true)"
+            echo "gcc:     $(command -v gcc || echo '(missing)') — $(gcc --version 2>&1 | head -n1 || true)"
+            echo "make:    $(make --version 2>&1 | head -n1)"
+            echo "nproc:   $(nproc)"
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"

@@ -5917,7 +5917,7 @@ static void fts_update_enter_idle_time(void)
 			 "%s %s: error while writing enter idle time ERROR %08X\n", tag, __func__, ret);
 }
 
-static void  fts_map_to_read_cmd(u8 write_type, u8  write_pos, u8 *read_type, u8 *read_pos)
+static void __maybe_unused fts_map_to_read_cmd(u8 write_type, u8  write_pos, u8 *read_type, u8 *read_pos)
 {
 
 	/*

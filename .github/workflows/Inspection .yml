@@ -1,0 +1,91 @@
+name: Check kernel MIUI/HyperOS eligibility
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: 'Kernel repo URL'
+        required: true
+        default: 'https://github.com/GhaintBadhan/kernel_xiaomi_kangx'
+      ref:
+        description: 'Branch or tag to inspect'
+        required: true
+        default: 'main'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    env:
+      PATTERN: 'miui|hyperos|xiaomi|vili|vendor_boot|init_boot|dynamic_partition|system_as_root'
+
+    steps:
+      - name: Clone kernel source (depth=1)
+        run: |
+          set -euo pipefail
+          git clone --depth=1 --branch "${{ inputs.ref }}" "${{ inputs.repo }}" kernel_xiaomi_kangx
+          cd kernel_xiaomi_kangx
+          echo "HEAD: $(git log -1 --oneline)"
+          {
+            echo "## Kernel eligibility check"
+            echo "- Repo: \`${{ inputs.repo }}\`"
+            echo "- Ref: \`${{ inputs.ref }}\`"
+            echo "- HEAD: \`$(git log -1 --oneline)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: List defconfigs
+        run: |
+          cd kernel_xiaomi_kangx
+          {
+            echo ""
+            echo "### \`arch/arm64/configs\`"
+            echo '```'
+            if [ -d arch/arm64/configs ]; then
+              ls -1 arch/arm64/configs
+            else
+              echo "(directory not found)"
+            fi
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Grep for MIUI/HyperOS indicators
+        run: |
+          cd kernel_xiaomi_kangx
+
+          files=()
+          [ -d arch/arm64/configs ] && files+=("arch/arm64/configs")
+          for f in README* build* .github; do
+            [ -e "$f" ] && files+=("$f")
+          done
+
+          {
+            echo ""
+            echo "### grep: \`$PATTERN\`"
+            echo "Paths searched: \`${files[*]:-<none>}\`"
+            echo '```'
+            if [ ${#files[@]} -eq 0 ]; then
+              echo "(no candidate files or directories found)"
+            else
+              grep -RniE "$PATTERN" "${files[@]}" 2>/dev/null || echo "(no matches)"
+            fi
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Check Releases for MIUI/HyperOS/AOSP labels
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_REPO: ${{ inputs.repo }}
+        run: |
+          set -uo pipefail
+          REPO_PATH="${INPUT_REPO#https://github.com/}"
+          REPO_PATH="${REPO_PATH%.git}"
+          {
+            echo ""
+            echo "### Releases on \`$REPO_PATH\` (strongest signal)"
+            echo '```'
+            gh release list -R "$REPO_PATH" --limit 30 2>&1 \
+              || echo "(no releases, or repo not readable)"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"

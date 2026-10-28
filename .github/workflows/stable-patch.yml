@@ -1,0 +1,43 @@
+name: Apply stable patch
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: Version your tree is at
+        default: "v5.4.234"
+      to:
+        description: Version to move to
+        default: "v5.4.249"
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    env:
+      FROM: ${{ inputs.from }}
+      TO: ${{ inputs.to }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build upstream diff
+        run: |
+          git config user.name "stable-patch"
+          git config user.email "stable-patch@users.noreply.github.com"
+          U=https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+          git fetch --depth=1 $U tag $FROM tag $TO || \
+            git fetch --depth=1 https://github.com/gregkh/linux.git tag $FROM tag $TO
+          git diff --binary $FROM $TO > /tmp/stable.patch
+          ls -l /tmp/stable.patch
+      - name: Apply with rejects
+        run: |
+          git checkout -b stable-patch
+          git apply --reject --whitespace=nowarn /tmp/stable.patch || true
+          mkdir -p stable-rejects
+          find . -name '*.rej' -not -path './stable-rejects/*' | while read f; do
+            mv "$f" "stable-rejects/$(echo "$f" | sed 's|^\./||; s|/|__|g')"
+          done
+          echo "Rejected hunks:" >> $GITHUB_STEP_SUMMARY
+          ls stable-rejects >> $GITHUB_STEP_SUMMARY
+          grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL|EXTRAVERSION) ' Makefile >> $GITHUB_STEP_SUMMARY
+          git add -A
+          git commit -m "Apply stable $FROM..$TO (rejects in stable-rejects/)"
+          git push origin stable-patch --force

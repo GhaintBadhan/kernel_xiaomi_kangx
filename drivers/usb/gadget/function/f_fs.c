@@ -3969,6 +3969,7 @@ static void ffs_func_unbind(struct usb_configuration *c,
 	/* Drain any pending AIO completions */
 	drain_workqueue(ffs->io_completion_wq);
 
+	ffs_event_add(ffs, FUNCTIONFS_UNBIND);
 	if (!--opts->refcnt)
 		functionfs_unbind(ffs);
 
@@ -3994,10 +3995,13 @@ static void ffs_func_unbind(struct usb_configuration *c,
 	func->function.ssp_descriptors = NULL;
 	func->interfaces_nums = NULL;
 
+<<<<<<< HEAD
 	ffs_event_add(ffs, FUNCTIONFS_UNBIND);
 
 	ffs_log("exit: state %d setup_state %d flag %lu", ffs->state,
 		ffs->setup_state, ffs->flags);
+=======
+>>>>>>> b30db4f7e45f3c17cca2ba5be6f22762837a6e34
 }
 
 static struct usb_function *ffs_alloc(struct usb_function_instance *fi)

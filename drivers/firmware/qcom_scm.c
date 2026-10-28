@@ -1227,8 +1227,13 @@ static int qcom_scm_probe(struct platform_device *pdev)
 
 static void qcom_scm_shutdown(struct platform_device *pdev)
 {
+<<<<<<< HEAD
 	qcom_scm_disable_sdi();
 	qcom_scm_halt_spmi_pmic_arbiter();
+=======
+	/* Clean shutdown, disable download mode to allow normal restart */
+	qcom_scm_set_download_mode(false);
+>>>>>>> b30db4f7e45f3c17cca2ba5be6f22762837a6e34
 }
 
 static const struct of_device_id qcom_scm_dt_match[] = {
